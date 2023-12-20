@@ -1,0 +1,20 @@
+
+[
+;treble;    'qwer{tyui}'
+;base;      'asdf{ghjk}'
+][
+    'qw{[er][ty]}ui'
+    '[{as}{df}][{gh}{jk}]'
+][
+    {a''sd[]fg{}hj'[{''''}]'k}
+]
+
+;[
+;'qwer{tyui}'
+;'asdf{ghjk}'
+;][
+;'  q           w     {[er][ty]}ui'
+;'[{as}{df}][{gh}{jk}]'
+;][
+;{asdfghjk}
+;]
