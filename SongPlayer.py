@@ -1,32 +1,32 @@
 
 from typing import Callable, Any, NamedTuple
-from time import time as get_current_time
-import keyboard
-from keyboard import KeyboardEvent
-from ply import lex, yacc
+from random import random
+from pynput.keyboard import Controller, Key, KeyCode, HotKey, Listener
+from threading import Thread
+from time import sleep, perf_counter as get_current_time
 import tkinter as tk
+from tkinter.messagebox import showerror
+from tkinter.simpledialog import askstring
+from tkinter.filedialog import askopenfilename
+from SongGrammer import RegularGroup, parser, Note, Code, NoteGroup, Atom, Rest, ChordGroup, ScaleGroup, SharpNote
 
 
-lexer = lex.lex()
-parser = yacc.yacc()
 
 def parse_text_to_tree (text:str) -> RegularGroup:
     parser.parse(text)
     return RegularGroup(parser.symstack[1].value)
 
-class Beat (NamedTuple):
-    time : float
-    duration : float
-    note : Note
-
-class CodeAction (NamedTuple):
-    time : float
-    code : Code
+class Action:
+    __slots__ = "time", "note", "press"
+    def __init__ (self, time:float, note:Note, press:bool):
+        self.time :float = time
+        self.note :Note = note
+        self.press :bool = press
     
-def parse_tree_to_key_event_list (root:RegularGroup) -> list[Beat]:
+def parse_tree_to_action_list (root:RegularGroup) -> list[Action]:
     """Takes the output of the YACC parser and
     returns a list of keyboard events to play back using"""
-    actionList :list[Beat] = []
+    actionList :list[Action] = []
     timeFactor :float = 0.5 # 120bpm
 
     def append_atom (atom:Atom, time:float, duration:float) -> float:
@@ -34,8 +34,10 @@ def parse_tree_to_key_event_list (root:RegularGroup) -> list[Beat]:
         nonlocal actionList, timeFactor
         if   isinstance(atom, Note):
             if not isinstance(atom, Rest):
-                actionList.append(Beat(time, duration*timeFactor, atom)) # type: ignore (pylance thinks timeFactor is unbound, its not)
-            return duration * timeFactor # type: ignore (pylance thinks timeFactor is unbound, its not)
+                TINY_NUM :float = 0.0001
+                actionList.append(Action(time, atom, True))
+                actionList.append(Action(time+duration*timeFactor-TINY_NUM, atom, False))
+            return duration * timeFactor
         elif isinstance(atom, NoteGroup):
             return parse_tree(atom, time, duration)
         elif isinstance(atom, Code):
@@ -59,118 +61,195 @@ def parse_tree_to_key_event_list (root:RegularGroup) -> list[Beat]:
             return time - oldTime
 
     parse_tree(root, 0.0, 1.0)
-    return actionList
+    return sorted(actionList, key=lambda x: x.time or 0.0)
+# END parse_tree_to_action_list
 
-# END parse_tree_to_key_event_list
+def play_action_list (actionList:list[Action], *, drift:float=0.0, noise:float=0.0) -> Thread:
+    def __play_action_list (actionList:list[Action]):
+        keyboard = Controller()
+        startTime :float = get_current_time()
+        targetTime :float = 0.0
+        curDrift :float = 0.0
+        for act in actionList:
+            curDrift += (random()*2-1) * drift
+            act.time += curDrift + (random()*2-1) * noise
+        actionList = sorted(actionList, key=lambda a: a.time)
+        for act in actionList:
+            targetTime = startTime + act.time
+            while get_current_time() < targetTime:
+                pass # sleep(0.0)
+            if keyboardMonitor.activeThread is None: return
+            if act.press is False:
+                keyboard.release(act.note.key)
+            else:
+                if isinstance(act.note, SharpNote):
+                    with keyboard.pressed(Key.shift):
+                        keyboard.press(act.note.key)
+                else:
+                    keyboard.press(act.note.key)
+        keyboardMonitor.activeThread = None
+    thread = Thread(
+        target=__play_action_list,
+        args=(actionList,)
+    )
+    if keyboardMonitor.activeThread is None:
+        keyboardMonitor.activeThread = thread
+        thread.start()
+    return thread
 
-def shift_key (down:bool, time:float) -> KeyboardEvent:
-    SHIFT_SCAN_CODE :int = keyboard.key_to_scan_codes('shift')[0]
-    return KeyboardEvent('down' if down else 'up', SHIFT_SCAN_CODE, 'shift', time)
+class KeyboardMonitor:
 
-def action_list_to_key_list (actionList:list[Beat]) -> list[KeyboardEvent]:
-    curTime :float = get_current_time()
-    keList :list[KeyboardEvent] = []
-    TINY_NUM :float = 0.00001
-    for act in actionList:
-        scanCode :int = keyboard.key_to_scan_codes(act.note.key)[0]
-        if isinstance(act.note, SharpNote):
-            keList.append(shift_key(True, curTime + act.time))
-        keList.append(KeyboardEvent(
-            'down', scanCode, act.note.key,
-            curTime + act.time
-        ))
-        if isinstance(act.note, SharpNote):
-            keList.append(shift_key(False, curTime + act.time))
-        keList.append(KeyboardEvent(
-            'up', scanCode, act.note.key,
-            curTime + act.time + act.duration - TINY_NUM
-        ))
-    return sorted(keList, key=lambda k: k.time or 0.0)
+    __slots__ = "shift", "ctrl", "alt", "__listener", "__hotkeys", "activeThread"
+    def __init__(self) -> None:
+        self.shift :bool = False
+        self.ctrl :bool = False
+        self.alt :bool = False
+        self.__listener = Listener(
+            on_press=self.__on_press_callback,
+            on_release=self.__on_release_callback
+        )
+        self.__hotkeys :dict[str, Callable[[],Thread]] = {}
+        self.activeThread :Thread|None = None
+    
+    def __del__ (self):
+        self.__listener.stop()
 
-def action_list_to_key_list_tapping (actionList:list[Beat]) -> list[KeyboardEvent]:
-    curTime :float = get_current_time()
-    keList :list[KeyboardEvent] = []
-    TINY_NUM :float = 0.00001
-    for act in actionList:
-        scanCode :int = keyboard.key_to_scan_codes(act.note.key)[0]
-        if isinstance(act.note, SharpNote):
-            keList.append(shift_key(True, curTime + act.time + TINY_NUM*len(keList)))
-        keList.append(KeyboardEvent(
-            'down', scanCode, act.note.key,
-            curTime + act.time + TINY_NUM*len(keList)
-        ))
-        if isinstance(act.note, SharpNote):
-            keList.append(shift_key(False, curTime + act.time + TINY_NUM*len(keList)))
-        keList.append(KeyboardEvent(
-            'up', scanCode, act.note.key,
-            curTime + act.time + TINY_NUM*len(keList)
-        ))
-    return sorted(keList, key=lambda k: k.time or 0.0)
+    def start (self): self.__listener.start()
+    def stop (self): self.__listener.stop()
 
-def play_tong (e:KeyboardEvent, filePath:str):
-    file = open(filePath, "r")
-    text :str = file.read()
-    tree = parse_text_to_tree(text)
-    actionList :list[Beat] = parse_tree_to_key_event_list(tree)
-    keyEventList = action_list_to_key_list_tapping(actionList)
-    keyboard.play(keyEventList)
-    print("Done!")
+    def __contains__ (self, o:str) -> bool:
+        return o in self.__hotkeys
+
+    def add_hotkey (self, key:str, callback:Callable[[],Thread]):
+        if key not in self.__hotkeys:
+            self.__hotkeys[key] = callback
+    
+    def remove_hotkey (self, key:str):
+        if key in self.__hotkeys:
+            self.__hotkeys.pop(key)
+
+    def __on_press_callback (self, e:Key|KeyCode|None):
+        if e is None:
+            print("Error: Key event with no key event ???")
+            return
+        char = e.name if isinstance(e, Key) else e.char
+        if self.activeThread:
+            if e == Key.esc:
+                keyboardMonitor.activeThread = None
+            return
+        match char:
+            case 'shift': self.shift = True
+            case 'ctrl': self.ctrl = True
+            case 'alt': self.alt = True
+        if char in self.__hotkeys:
+            self.__hotkeys[char]()
+
+    def __on_release_callback (self, e:Key|KeyCode|None):
+        if self.activeThread: return
+        if e is None: return
+        char = e.name if isinstance(e, Key) else e.char
+        match char:
+            case 'shift': self.shift = False
+            case 'ctrl': self.ctrl = False
+            case 'alt': self.alt = False
+
+keyboardMonitor :KeyboardMonitor = KeyboardMonitor()
 
 ################################################################
 #                            GUI                               #
 ################################################################
 
-class TongListItem (NamedTuple):
-    filePath :str
-    keyBind :str = "..."
-    keyList :list[KeyboardEvent] = []
+class TongListItem:
+    __slots__ = "filePath", "keyBind", "actionList"
+    def __init__(self, filePath:str, actionList:list[Action]=[], keyBind:str="...") -> None:
+        self.filePath :str = filePath
+        self.keyBind :str = keyBind
+        self.actionList :list[Action] = actionList
 
-class GUI_TongListItem (tk.Frame):
+class GUI_TongListItem:
     MaxButtonWidth :int = 1
     
     __slots__ = "tong", "keyBindButton", "tongFileName", "refreshButton"
-    def __init__(self, master, tong:TongListItem):
-        super().__init__(master)
+    def __init__(self, master, tong:TongListItem, row:int):
         self.tong = tong
-        self.keyBindButton = tk.Button(self,
+        self.keyBindButton = tk.Button(master,
             background="#D6D4CE",
             font="Arial",
             bd=2,
-            command=lambda: print("Bind button pressed"),
+            command=self.change_keybind,
             justify="center",
             text=self.tong.keyBind
         )
-        self.tongFileName = tk.Label(self,
-            font="Arial", height=20, text=tong.filePath
+        self.tongFileName = tk.Label(master,
+            font="Arial", text=tong.filePath, justify='left', anchor='w'
         )
-        self.refreshButton = tk.Button(self,
+        self.refreshButton = tk.Button(master,
             background="#69F26D", bd=2,
-            justify='center', text="R", command=lambda: print("Refresh")
+            justify='center', text="R", command=self.refresh_tong
         )
-        self.keyBindButton.grid(row=0, column=0)
-        self.tongFileName.grid(row=0, column=1)
-        self.refreshButton.grid(row=0, column=2)
-        self.pack()
+        self.keyBindButton.grid(row=row, column=0, padx=4)
+        self.tongFileName.grid(row=row, column=1, padx=4, sticky='w')
+        self.refreshButton.grid(row=row, column=2, padx=4)
+    
+    def refresh_tong (self):
+        self.tong.actionList = parse_tree_to_action_list(
+            parse_text_to_tree(
+                open(self.tong.filePath, 'r').read()
+            )
+        )
 
+    def change_keybind (self):
+        answer = askstring("Rebind hotkey", "Please enter which key you'd like to bind to",
+            initialvalue=self.tong.keyBind if self.tong.keyBind != "..." else None
+        )
+        if answer is None: return
+        try: _ = HotKey.parse(answer)
+        except ValueError: return
+        if answer in keyboardMonitor:
+            showerror("Invalid keybind", "That key is already bound to something else")
+            return
+        if self.tong.keyBind != "...":
+            keyboardMonitor.remove_hotkey(self.tong.keyBind)
+        self.tong.keyBind = answer
+        keyboardMonitor.add_hotkey(answer, lambda: play_action_list(self.tong.actionList, drift=0.0, noise=0.0))
+        self.keyBindButton.config(text=answer)
+
+class GUI_TongList (tk.Frame):
+
+    __slots__ = "tongs", "addButton"
+    def __init__(self, master, initialList:list[TongListItem]=[]):
+        super().__init__(master)
+        self.tongs :list[GUI_TongListItem] = []
+        self.addButton = tk.Button(self, background='green', text='+', command=self.add_new_tong)
+        self.addButton.grid(column=0, row=0, sticky='w')
+        for t in initialList: self.append(t)
+
+    def add_new_tong (self):
+        fileName = askopenfilename(defaultextension='tong', filetypes=[('Text Song', '*.tong')], title="Please supply a file")
+        if fileName == "": return
+        file = open(fileName, 'r')
+        text = file.read()
+        tree = parse_text_to_tree(text)
+        actionList = parse_tree_to_action_list(tree)
+        self.append(TongListItem(fileName, actionList=actionList))
+        file.close()
+    
+    def append (self, tong:TongListItem):
+        g = GUI_TongListItem(self, tong, len(self.tongs)+1)
+        self.tongs.append(g)
+        self.addButton.grid(column=1, row=len(self.tongs)+1, sticky='w')
 
 rootWindow = tk.Tk()
 rootWindow.title("Tong Player")
-temp = GUI_TongListItem(rootWindow, TongListItem("Bibbidy obbity boo"))
-rootWindow.minsize(512, 360)
-
-
-
+temp = GUI_TongList(rootWindow)
+temp.pack(side='top', anchor='n')
+rootWindow.minsize(256, 128)
 
 ################################################################
 #                           Main                               #
 ################################################################
 
-Key = str | int
-def hook_numpad_key (key:Key, callback :Callable[[keyboard.KeyboardEvent], Any]):
-    keyboard.on_press_key(key, lambda e: False if e.is_keypad else True, suppress=True)
-    keyboard.on_release_key(key, lambda e: callback(e) or True if e.is_keypad else True, suppress=True)
-
 if __name__ == "__main__":
+    keyboardMonitor.start()
     rootWindow.mainloop()
-    # hook_numpad_key("1", lambda e: play_tong(e, "test6.tong"))
-    # keyboard.wait("ctrl+z", suppress=True)
+    keyboardMonitor.stop()

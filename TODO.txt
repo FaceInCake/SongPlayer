@@ -1,0 +1,33 @@
+
+
+- Staccato (dot symbol above note)
+  > Shorten note duration but not atom duration, (aka, play sharply)
+
+- Fermata (circle with semi-circle above it)
+  > Prolong atom by some fraction, (aka, hold pause)
+- Tie (curved line between notes of same pitch)
+  > Note gains duration of the sum of the notes, while atom maintains duration
+- Casesura (two angled dashes at the top of a measure)
+  > Brief pause that's off rhythm, like a silent fermata, but shorter
+- Dotted (small dot after note)
+  > atom duration *= 1.5, two dots = 1.75, 3=1.875
+- Pedal (looks like Leo, but it says Ped. below measure)
+  > note duration is extended up until a set point, atom duration unaffected
+  > All currently held down notes have their durations extended
+  > All base notes have their durations extended
+ 
+- Flag ???? (beams on notes) ((beams can melt steel notes))
+  > Halfs the duration of the atom/note
+- Arpeggio / Rolled Chords (squigle next to chord)
+  > Notegroup-as-an-atom duration is kept, while instead of notes being played at the same time, they're played in quick succession
+
+
+- Tenuto (above line)
+  > Play note for full duration
+    > (Maybe have a 'clear effects' modifier?)
+
+
+
+
+- Check for two notes being played at the same time
+    - (probably make it so it still plays the inner note)

@@ -1,3 +1,10 @@
+"Defines constants and tokens for the lexer portion of this program"
+
+from ply import lex
+
+#----------------------
+# Constant Definitions
+#----------------------
 
 KEY_NOTES = "1!2@34$5%6^78*9(0qQwWeErtTyYuiIoOpPasSdDfgGhHjJklLzZxcCvVbBnm"
 # Not key notes:    - _ = + [ ] { } \ | ; : ' " , < . > / ?
@@ -13,10 +20,13 @@ _TRANSLATE_TABLE = { # Keys that require the shift modifier
     'P': 'p',  'Q': 'q',  'R': 'r',  'S': 's',  'T': 't',
     'U': 'u',  'V': 'v',  'W': 'w',  'X': 'x',  'Y': 'y',  'Z': 'z',  
 }
+_REV_TRANSLATE_TABLE = {v:k for k,v in _TRANSLATE_TABLE.items()}
 REGULAR_NOTES = "".join(key for key in KEY_NOTES if key not in _TRANSLATE_TABLE)
 SHIFTED_NOTES = "".join(key for key in KEY_NOTES if key     in _TRANSLATE_TABLE)
 
-
+#-------------------
+# Token Definitions
+#-------------------
 
 states = (
     ('code', 'exclusive'),
@@ -41,20 +51,25 @@ tokens = (
 def t_COMMENT (_):
     r";.*?(?:;|\n|$)"
     pass
+
 def t_LEFT_PAREN_ANGLED (t):
     r"<"
     t.lexer.begin('code')
+
 def t_code_RIGHT_PAREN_ANGLED (t):
     r">"
     t.lexer.begin('INITIAL')
+
 def t_code_ID (t):
     r"[bB][pP][mM]"
     t.value = t.value.lower()
     return t
+
 def t_code_NUMBER (t):
     r"\d+(?:\.\d+)?"
     t.value = float(t.value)
     return t
+
 t_REST = r"~"
 t_LEFT_PAREN_SQUARE = r"\["
 t_RIGHT_PAREN_SQUARE = r"\]"
@@ -76,3 +91,6 @@ def t_error (t):
 def t_code_error (t):
     print('Illegal code character "%s"' % t.value[0])
     t.lexer.skip(1)
+
+##################
+lexer = lex.lex()

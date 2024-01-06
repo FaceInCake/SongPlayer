@@ -1,7 +1,12 @@
 
 from abc import ABC
 from SongLexer import _TRANSLATE_TABLE
+from ply import yacc
+from SongLexer import tokens
 
+#----------------------
+# Abstract Syntax Tree
+#----------------------
 
 class Atom (ABC): pass
 
@@ -9,10 +14,13 @@ class Note (Atom):
     __slots__ = "key"
     def __init__(self, key:str):
         self.key :str = key
+
 class RegNote (Note): pass
+
 class SharpNote (Note):
     def __init__(self, key: str):
         super().__init__(_TRANSLATE_TABLE.get(key, key))
+
 class Rest (Note):
     def __init__(self):
         super().__init__("")
@@ -26,11 +34,14 @@ class Code (Atom):
 class NoteGroup (Atom, list[Atom]):
     def __repr__(self) -> str:
         return self.__class__.__name__+super().__str__()
+
 class RegularGroup (NoteGroup): pass
 class ChordGroup (NoteGroup): pass
 class ScaleGroup (NoteGroup): pass
 
-
+#--------------------
+# Grammer Definition
+#--------------------
 
 def p_notegroup2 (p):
     "notegroup : notegroup atom"
@@ -87,7 +98,10 @@ precedence = (
     ('left',  'APOSTROPHE', 'NUMBER'),
     ('right', 'ID', 'EQUALS')
 )
-
+    
 def p_error(p):
     if p is not None:
         print("Syntax error:", p)
+
+#####################
+parser = yacc.yacc()
